@@ -15,6 +15,7 @@ import (
 var inFile = flag.String("in", "", "input file (defaults to stdin)")
 var outFile = flag.String("out", "", "output file (defaults to stdout)")
 var printCols = flag.Bool("cols", false, "print columns of first record and exit")
+var scanAll = flag.Bool("scan-all", true, "scan all records for column names")
 
 // var includeExtraColumns = flag.Bool("include-extra", false, "Include a catchall with extra columns")
 // var errOnUnknownColumns = flag.Bool("error-on-unknown", false, "Error out on unknown columns")
@@ -64,18 +65,62 @@ func main() {
 
 	dec := json.NewDecoder(input)
 	enc := csv.NewWriter(output)
+	defer enc.Flush()
+
+	pendingRecords := make([]map[string]interface{}, 0)
 
 	if len(columns) == 0 {
-		rec := make(map[string]interface{})
-		err := dec.Decode(&rec)
-		if err == io.EOF {
-			return
-		} else if err != nil {
-			log.Fatalf("Error reading input: %s", err)
-		}
-
 		flatMap := make(map[string]string)
-		flattenRecord("", rec, flatMap)
+
+		if !*scanAll {
+			rec := make(map[string]interface{})
+			err := dec.Decode(&rec)
+			if err == io.EOF {
+				return
+			} else if err != nil {
+				log.Fatalf("Error reading input: %s", err)
+			}
+
+			flattenRecord("", rec, flatMap)
+
+			pendingRecords = append(pendingRecords, rec)
+		} else {
+			_, err := input.Seek(0, io.SeekStart)
+			seekable := err == nil
+			if seekable {
+				for {
+					rec := make(map[string]interface{})
+					err := dec.Decode(&rec)
+					if err == io.EOF {
+						break
+					} else if err != nil {
+						log.Fatalf("Error reading input: %s", err)
+					}
+
+					flattenRecord("", rec, flatMap)
+				}
+
+				_, err = input.Seek(0, io.SeekStart)
+				if err != nil {
+					log.Fatalf("Failed to seek back to beginning of file")
+				}
+				dec = json.NewDecoder(input)
+			} else {
+				// file not seekable, collect records in memory
+				for {
+					rec := make(map[string]interface{})
+					err := dec.Decode(&rec)
+					if err == io.EOF {
+						break
+					} else if err != nil {
+						log.Fatalf("Error reading input: %s", err)
+					}
+
+					pendingRecords = append(pendingRecords, rec)
+					flattenRecord("", rec, flatMap)
+				}
+			}
+		}
 
 		keys := make([]string, 0, len(flatMap))
 		for k := range flatMap {
@@ -93,9 +138,14 @@ func main() {
 
 		enc.Write(keys)
 		columns = keys
-		printRecord(enc, columns, flatMap)
 	} else {
 		enc.Write(columns)
+	}
+
+	for _, rec := range pendingRecords {
+		flatMap := make(map[string]string)
+		flattenRecord("", rec, flatMap)
+		printRecord(enc, columns, flatMap)
 	}
 
 	for {

@@ -10,12 +10,14 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 var inFile = flag.String("in", "", "input file (defaults to stdin)")
 var outFile = flag.String("out", "", "output file (defaults to stdout)")
 var printCols = flag.Bool("cols", false, "print columns of first record and exit")
 var scanAll = flag.Bool("scan-all", true, "scan all records for column names")
+var toLower = flag.Bool("to-lower", true, "lowercase column names")
 
 // var includeExtraColumns = flag.Bool("include-extra", false, "Include a catchall with extra columns")
 // var errOnUnknownColumns = flag.Bool("error-on-unknown", false, "Error out on unknown columns")
@@ -178,6 +180,10 @@ func flattenRecord(prefix string, rec map[string]interface{}, destMap map[string
 		outKey := k
 		if prefix != "" {
 			outKey = prefix + "." + k
+		}
+
+		if *toLower {
+			outKey = strings.ToLower(outKey)
 		}
 
 		switch vv := v.(type) {
